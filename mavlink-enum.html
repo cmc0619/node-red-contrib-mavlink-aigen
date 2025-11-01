@@ -110,7 +110,8 @@
               $enum.append($("<option/>").text("No enums found").val(""));
             }
           }).fail(xhr => {
-            $enum.empty().append($("<option/>").text("Error loading enums").val(""));
+            const msg = (xhr.responseJSON && xhr.responseJSON.error) ? xhr.responseJSON.error : "Error loading enums";
+            $enum.empty().append($("<option/>").text(msg).val(""));
           });
         }
 
@@ -131,8 +132,9 @@
             } else {
               $key.append($("<option/>").text("No keys found").val(""));
             }
-          }).fail(_ => {
-            $key.empty().append($("<option/>").text("Error loading keys").val(""));
+          }).fail(xhr => {
+            const msg = (xhr.responseJSON && xhr.responseJSON.error) ? xhr.responseJSON.error : "Error loading keys";
+            $key.empty().append($("<option/>").text(msg).val(""));
           });
         }
 
