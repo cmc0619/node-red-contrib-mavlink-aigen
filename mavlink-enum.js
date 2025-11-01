@@ -5,6 +5,8 @@ module.exports = function(RED) {
 
   // Simple in-memory cache: { headerPathHash: { mtimeMs, enums: Map<EnumName, Array<{key, value, comment}>> } }
   const ENUM_CACHE = new Map();
+  // Track file watchers to prevent leaks
+  const FILE_WATCHERS = new Map();
 
   function hashPath(p) {
     return crypto.createHash("sha1").update(path.resolve(p)).digest("hex");
@@ -101,11 +103,23 @@ module.exports = function(RED) {
 
     ENUM_CACHE.set(hpHash, { mtimeMs: stat.mtimeMs, enums });
 
-    // also set a watcher to invalidate cache if changed later
+    // Close existing watcher if present to prevent leaks
+    if (FILE_WATCHERS.has(hpHash)) {
+      try {
+        FILE_WATCHERS.get(hpHash).close();
+      } catch (_) { /* ignore */ }
+    }
+
+    // Set a watcher to invalidate cache if changed later
     try {
-      fs.watch(full, { persistent: false }, () => {
+      const watcher = fs.watch(full, { persistent: false }, () => {
         ENUM_CACHE.delete(hpHash);
+        FILE_WATCHERS.delete(hpHash);
+        try {
+          watcher.close();
+        } catch (_) { /* ignore */ }
       });
+      FILE_WATCHERS.set(hpHash, watcher);
     } catch (_) { /* ignore on some FS */ }
 
     return enums;
