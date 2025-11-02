@@ -1,6 +1,6 @@
 # ✅ Examples - ALL COMPLETE!
 
-All 13 planned example flows have been built and are ready to use!
+All 15 example flows have been built and are ready to use!
 
 ## 📦 What's Included
 
@@ -20,18 +20,20 @@ Located in `examples/telemetry/`
 7. **status-panel.json** - Vehicle status dashboard (armed, mode, GPS, health)
 8. **altitude-speed.json** - Flight data gauges (altitude, speed, heading, climb rate)
 
-### ✅ Advanced Tools (4 flows)
+### ✅ Advanced Tools (6 flows)
 Located in `examples/advanced/`
 
 9. **parameter-tool.json** - Read/write vehicle parameters
 10. **safety-monitor.json** - Automated safety alerts (battery, GPS, geofence, altitude)
 11. **mission-uploader.json** - Upload waypoint missions from CSV
 12. **data-logger.json** - Record all MAVLink traffic to files
+13. **geofence-visualization.json** - Interactive map with geofence monitoring
+14. **flight-simulator.json** - Replay recorded logs for testing
 
 ### ✅ Complete GCS (1 flow)
 Located in `examples/complete-gcs/`
 
-13. **full-ground-station.json** - Complete ground control station dashboard
+15. **full-ground-station.json** - Complete ground control station dashboard
    - Flight controls (ARM/DISARM/TAKEOFF/LAND/RTL)
    - Mode switching
    - Real-time telemetry displays
@@ -120,25 +122,10 @@ These examples are building blocks! Combine them to create:
 
 ## 🤝 Contributing
 
-Have ideas for more examples?
+Built something cool? Share it!
 - Export your flow
-- Add documentation
-- Submit a pull request!
-
-**Example ideas you can build using existing Node-RED nodes + these MAVLink nodes:**
-
-- **Geofence visualization** - Use node-red-dashboard-worldmap + our GPS telemetry
-- **Multi-vehicle dashboard** - Multiple mavlink-comms instances, switching UI
-- **Log replay/simulator** - Inject node reading data-logger JSONL files
-- **Voice control** - Alexa/Google Home nodes → mavlink-msg dynamic commands
-- **Video stream** - Dashboard template embedding video + our telemetry overlay
-- **Payload control** - Buttons/sliders → COMMAND_LONG for servos/relays
-- **RTK GPS setup** - GPS_INJECT_DATA message builder flow
-- **Companion computer integration** - MQTT bridge to ROS/other systems
-- **SMS alerts** - Twilio node + safety-monitor triggers
-- **Database logging** - InfluxDB/MySQL nodes + our telemetry
-
-All of these just wire existing Node-RED nodes to our MAVLink nodes - no new code needed!
+- Document what it does
+- Submit a pull request
 
 ---
 

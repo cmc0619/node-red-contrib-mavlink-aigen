@@ -100,6 +100,61 @@ Output format:
 
 ---
 
+### geofence-visualization.json
+**Interactive map with geofence monitoring**
+
+Features:
+- Real-time drone position on map
+- Visual geofence circles (max + warning)
+- Distance from home calculation
+- Altitude limit monitoring
+- Color-coded status (green/orange/red)
+- Breach alerts with toast notifications
+
+Perfect for:
+- Visual flight monitoring
+- Geofence compliance
+- Safe area enforcement
+- Pre-flight planning
+- Automated boundary checking
+
+Displays:
+- Drone position (helicopter icon)
+- Home position (house icon)
+- Maximum fence (red circle)
+- Warning fence (orange circle)
+- Progress bars for limits
+- Real-time distance/altitude
+
+---
+
+### flight-simulator.json
+**Replay recorded logs for testing**
+
+Features:
+- Load JSONL log files
+- Real-time playback with correct timing
+- Play/pause/stop controls
+- Variable speed (0.1x to 10x)
+- Progress bar and counter
+- Outputs in mavlink-comms format
+
+Perfect for:
+- Dashboard development without drone
+- Debugging flight issues
+- Training and demonstration
+- Regression testing
+- UI/UX iteration
+
+Capabilities:
+- Replay entire flights
+- Speed up/slow down playback
+- Loop recordings
+- Test edge cases
+- Safe development environment
+
+---
+
 ## 🚀 Quick Start
 
 1. Import the example you want to try
@@ -171,17 +226,7 @@ These tools work great together:
 
 ## 🤝 Contributing
 
-Have ideas for more advanced tools?
-- Export your flow
-- Document what it does
-- Submit a pull request!
-
-Ideas for future tools:
-- Log file analyzer/viewer
-- Terrain following setup
-- Camera mission planner
-- Geofence creator
-- Rally point manager
+Built something cool? Share it!
 
 ---
 
