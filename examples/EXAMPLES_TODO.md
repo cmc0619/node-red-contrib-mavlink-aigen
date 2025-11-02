@@ -125,14 +125,20 @@ Have ideas for more examples?
 - Add documentation
 - Submit a pull request!
 
-Possible additions:
-- Geofence visualization (map overlay)
-- Multi-vehicle dashboard (multiple drones on one screen)
-- Log replay/simulator (replay recorded flights)
-- Voice control integration (Alexa/Google)
-- Video stream overlay (telemetry on video)
-- Payload control examples (gripper, camera, etc.)
-- RTK GPS setup helper
+**Example ideas you can build using existing Node-RED nodes + these MAVLink nodes:**
+
+- **Geofence visualization** - Use node-red-dashboard-worldmap + our GPS telemetry
+- **Multi-vehicle dashboard** - Multiple mavlink-comms instances, switching UI
+- **Log replay/simulator** - Inject node reading data-logger JSONL files
+- **Voice control** - Alexa/Google Home nodes → mavlink-msg dynamic commands
+- **Video stream** - Dashboard template embedding video + our telemetry overlay
+- **Payload control** - Buttons/sliders → COMMAND_LONG for servos/relays
+- **RTK GPS setup** - GPS_INJECT_DATA message builder flow
+- **Companion computer integration** - MQTT bridge to ROS/other systems
+- **SMS alerts** - Twilio node + safety-monitor triggers
+- **Database logging** - InfluxDB/MySQL nodes + our telemetry
+
+All of these just wire existing Node-RED nodes to our MAVLink nodes - no new code needed!
 
 ---
 
