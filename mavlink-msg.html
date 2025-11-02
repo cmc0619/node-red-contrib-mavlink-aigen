@@ -122,7 +122,8 @@ return msg;
             .filter(isSendable)
             .sort();
 
-          $msg.append($("<option/>").text("-- Select Message --").val(""));
+          $msg.append($("<option/>").text("-- None (Dynamic) --").val(""));
+          $msg.append($("<option/>").text("──────────────").val("").attr("disabled", true));
 
           if (sendableNames.length === 0) {
             $msg.append($("<option/>").text("No sendable messages found").val(""));
@@ -250,7 +251,7 @@ return msg;
       color: "#87CEEB",
       defaults: {
         dialect: { value: "common", required: true },
-        messageType: { value: "", required: true },
+        messageType: { value: "" },  // Not required - can be empty for dynamic mode
         systemId: { value: 1, required: true, validate: RED.validators.number() },
         componentId: { value: 1, required: true, validate: RED.validators.number() },
         fields: { value: {} }
@@ -303,7 +304,21 @@ return msg;
           if (msgType) {
             generateFieldUI(msgType);
           } else {
-            $("#message-fields-container").empty().append($('<div class="form-tips">Select a message type to configure fields</div>'));
+            // None selected - show dynamic mode help
+            $("#message-fields-container").empty().append($(`
+              <div class="form-tips">
+                <strong>Dynamic Mode</strong><br>
+                Send message via msg.payload:<br>
+                <pre style="margin-top:5px;">msg.payload = {
+  messageType: "COMMAND_LONG",
+  command: 400,
+  param1: 1.0,
+  param2: 0,
+  ...
+}</pre>
+                Or use for parsing incoming messages from mavlink-comms.
+              </div>
+            `));
           }
         });
       },

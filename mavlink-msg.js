@@ -103,8 +103,43 @@ module.exports = function(RED) {
 
     node.on("input", async (msg, send, done) => {
       try {
-        if (!node.messageType) {
-          throw new Error("No message type configured");
+        // Detect mode
+        const isParseMode = msg.topic && typeof msg.topic === "string" && msg.topic.match(/^[A-Z_]+$/);
+        const isDynamicMode = !isParseMode && msg.payload && msg.payload.messageType;
+        const isStaticMode = !isParseMode && !isDynamicMode && node.messageType;
+
+        // MODE 1: Parse incoming MAVLink message from comms
+        if (isParseMode) {
+          // Just pass through the parsed data, maybe add formatting later
+          send({
+            payload: msg.payload,
+            topic: msg.topic,
+            mavlink: msg.mavlink || msg.payload
+          });
+          node.status({ fill: "blue", shape: "dot", text: `parsed: ${msg.topic}` });
+          done();
+          return;
+        }
+
+        // For send modes, determine message type
+        let messageType;
+        let fieldValues = {};
+
+        if (isDynamicMode) {
+          // MODE 2: Dynamic send from msg.payload
+          messageType = msg.payload.messageType;
+          fieldValues = msg.payload;
+        } else if (isStaticMode) {
+          // MODE 3: Static send from config
+          messageType = node.messageType;
+          fieldValues = { ...node.fields };
+
+          // Allow override from msg.payload
+          if (msg.payload && typeof msg.payload === "object") {
+            Object.assign(fieldValues, msg.payload);
+          }
+        } else {
+          throw new Error("No message type configured or provided");
         }
 
         // Load message definition
@@ -114,22 +149,17 @@ module.exports = function(RED) {
         }
 
         const { messages, enums } = await parseXMLDefinitions(xmlPath);
-        const msgDef = messages[node.messageType];
+        const msgDef = messages[messageType];
 
         if (!msgDef) {
-          throw new Error(`Message type not found: ${node.messageType}`);
+          throw new Error(`Message type not found: ${messageType}`);
         }
 
-        // Build message payload
+        // Build message payload with type conversion
         const payload = {};
 
         msgDef.fields.forEach(field => {
-          let value = node.fields[field.name];
-
-          // Allow override from incoming message
-          if (msg.payload && typeof msg.payload === "object" && msg.payload[field.name] !== undefined) {
-            value = msg.payload[field.name];
-          }
+          let value = fieldValues[field.name];
 
           // Type conversion
           if (value !== undefined && value !== null && value !== "") {
@@ -173,7 +203,7 @@ module.exports = function(RED) {
         const messageClass = common.REGISTRY[msgDef.id];
 
         if (!messageClass) {
-          throw new Error(`Message ${node.messageType} (id=${msgDef.id}) not found in node-mavlink registry. Only 'common' dialect messages can be sent currently.`);
+          throw new Error(`Message ${messageType} (id=${msgDef.id}) not found in node-mavlink registry. Only 'common' dialect messages can be sent currently.`);
         }
 
         // Create message instance
@@ -194,7 +224,7 @@ module.exports = function(RED) {
 
         // Publish to internal bus for mavlink-comms to send
         node.context().flow.set("mavlink_outgoing", {
-          message: node.messageType,
+          message: messageType,
           payload,
           bytes: Array.from(bytes)
         });
@@ -202,7 +232,7 @@ module.exports = function(RED) {
         // Also output the message data for debugging/logging
         send({
           payload: {
-            message: node.messageType,
+            message: messageType,
             fields: payload,
             systemId: node.systemId,
             componentId: node.componentId
@@ -210,7 +240,7 @@ module.exports = function(RED) {
           topic: "mavlink_outgoing"
         });
 
-        node.status({ fill: "green", shape: "dot", text: `sent: ${node.messageType}` });
+        node.status({ fill: "green", shape: "dot", text: `sent: ${messageType}` });
         done();
 
       } catch (err) {
