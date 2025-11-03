@@ -489,11 +489,6 @@ module.exports = function(RED) {
       parser = null;
 
       if (connection) {
-        // Remove event listeners before closing
-        if (connection.removeAllListeners) {
-          connection.removeAllListeners();
-        }
-
         if (node.connectionType === "serial") {
           // Check if connection has close method before checking isOpen
           if (typeof connection.close === "function") {
