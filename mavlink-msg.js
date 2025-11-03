@@ -126,17 +126,31 @@ module.exports = function(RED) {
   const mavlinkMappings = require("node-mavlink");
   const { minimal, common, ardupilotmega, uavionix, icarous, asluav, development, ualberta, storm32 } = mavlinkMappings;
 
+  function mergeRegistries(...registries) {
+    return registries
+      .filter(Boolean)
+      .reduce((acc, registry) => Object.assign(acc, registry), {});
+  }
+
   const dialectRegistries = {
-    'minimal': minimal.REGISTRY,
-    'common': common.REGISTRY,
-    'ardupilotmega': ardupilotmega.REGISTRY,
-    'uavionix': uavionix.REGISTRY,
-    'icarous': icarous.REGISTRY,
-    'asluav': asluav.REGISTRY || asluav.ASLUAV?.REGISTRY,
-    'development': development.REGISTRY,
-    'ualberta': ualberta.REGISTRY,
-    'storm32': storm32.REGISTRY,
+    minimal: mergeRegistries(minimal.REGISTRY),
+    common: mergeRegistries(minimal.REGISTRY, common.REGISTRY),
+    ardupilotmega: mergeRegistries(minimal.REGISTRY, common.REGISTRY, ardupilotmega.REGISTRY),
+    uavionix: mergeRegistries(minimal.REGISTRY, common.REGISTRY, uavionix.REGISTRY),
+    icarous: mergeRegistries(minimal.REGISTRY, common.REGISTRY, icarous.REGISTRY),
+    asluav: mergeRegistries(
+      minimal.REGISTRY,
+      common.REGISTRY,
+      asluav.REGISTRY || (asluav.ASLUAV ? asluav.ASLUAV.REGISTRY : null)
+    ),
+    development: mergeRegistries(minimal.REGISTRY, common.REGISTRY, development.REGISTRY),
+    ualberta: mergeRegistries(minimal.REGISTRY, common.REGISTRY, ualberta.REGISTRY),
+    storm32: mergeRegistries(minimal.REGISTRY, common.REGISTRY, storm32.REGISTRY),
   };
+
+  function getRegistry(dialect) {
+    return dialectRegistries[dialect] || dialectRegistries.common;
+  }
 
   function MavlinkMsgNode(config) {
     RED.nodes.createNode(this, config);
@@ -244,8 +258,7 @@ module.exports = function(RED) {
           }
         });
 
-        // Use cached dialect registry (loaded at module level)
-        const registry = dialectRegistries[node.dialect] || common.REGISTRY;
+        const registry = getRegistry(node.dialect);
 
         // Find message class in registry
         const messageClass = registry[msgDef.id];
@@ -255,36 +268,36 @@ module.exports = function(RED) {
           throw new Error(`Message ${messageType} (id=${msgDef.id}) not found in ${node.dialect} registry. Supported dialects: ${supportedDialects}`);
         }
 
-        // Create message instance
-        const message = new messageClass(
-          node.systemId,
-          node.componentId
-        );
+        const message = new messageClass();
 
-        // Set fields
-        Object.keys(payload).forEach(key => {
-          if (message[key] !== undefined) {
-            message[key] = payload[key];
-          }
-        });
+        if (Array.isArray(messageClass.FIELDS)) {
+          messageClass.FIELDS.forEach(field => {
+            const sourceName = field.source;
+            if (Object.prototype.hasOwnProperty.call(payload, sourceName)) {
+              message[field.name] = payload[sourceName];
+            }
+          });
+        }
 
-        // Serialize to bytes
-        const bytes = message.serialize();
-
-        // Publish to internal bus for mavlink-comms to send
         node.context().flow.set("mavlink_outgoing", {
           message: messageType,
+          messageId: msgDef.id,
           payload,
-          bytes: Array.from(bytes)
+          dialect: node.dialect,
+          systemId: node.systemId,
+          componentId: node.componentId,
+          timestamp: Date.now(),
         });
 
         // Also output the message data for debugging/logging
         send({
           payload: {
             message: messageType,
+            messageId: msgDef.id,
             fields: payload,
             systemId: node.systemId,
-            componentId: node.componentId
+            componentId: node.componentId,
+            mavlink: message
           },
           topic: "mavlink_outgoing"
         });

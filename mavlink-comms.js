@@ -7,7 +7,53 @@ module.exports = function(RED) {
   const net = require("net");
   const { execSync } = require("child_process");
   const xml2js = require("xml2js");
-  const { common: mavlinkCommon } = require("node-mavlink");
+  const mavlinkLib = require("node-mavlink");
+  const {
+    MavLinkPacketSplitter,
+    MavLinkPacketParser,
+    MavLinkProtocolV1,
+    MavLinkProtocolV2,
+    minimal,
+    common,
+    ardupilotmega,
+    uavionix,
+    icarous,
+    asluav,
+    development,
+    ualberta,
+    storm32,
+  } = mavlinkLib;
+
+  function mergeRegistries(...registries) {
+    return registries
+      .filter(Boolean)
+      .reduce((acc, registry) => Object.assign(acc, registry), {});
+  }
+
+  const DIALECT_REGISTRY_BUILDERS = {
+    minimal: () => mergeRegistries(minimal.REGISTRY),
+    common: () => mergeRegistries(minimal.REGISTRY, common.REGISTRY),
+    ardupilotmega: () => mergeRegistries(minimal.REGISTRY, common.REGISTRY, ardupilotmega.REGISTRY),
+    uavionix: () => mergeRegistries(minimal.REGISTRY, common.REGISTRY, uavionix.REGISTRY),
+    icarous: () => mergeRegistries(minimal.REGISTRY, common.REGISTRY, icarous.REGISTRY),
+    asluav: () => mergeRegistries(
+      minimal.REGISTRY,
+      common.REGISTRY,
+      asluav.REGISTRY || (asluav.ASLUAV ? asluav.ASLUAV.REGISTRY : null)
+    ),
+    development: () => mergeRegistries(minimal.REGISTRY, common.REGISTRY, development.REGISTRY),
+    ualberta: () => mergeRegistries(minimal.REGISTRY, common.REGISTRY, ualberta.REGISTRY),
+    storm32: () => mergeRegistries(minimal.REGISTRY, common.REGISTRY, storm32.REGISTRY),
+  };
+
+  const registryCache = {};
+  function getRegistryForDialect(dialect) {
+    if (!registryCache[dialect]) {
+      const builder = DIALECT_REGISTRY_BUILDERS[dialect] || DIALECT_REGISTRY_BUILDERS.common;
+      registryCache[dialect] = builder();
+    }
+    return registryCache[dialect];
+  }
 
   // Global storage for XML definitions and generated classes
   const XML_DIR = path.join(RED.settings.userDir, "mavlink-xmls");
@@ -259,8 +305,47 @@ module.exports = function(RED) {
 
     let connection = null;
     let heartbeatTimer = null;
-    let parser = null;
     let splitter = null;
+    let parser = null;
+    let activeRegistry = null;
+    let sequence = 0;
+
+    function nextSequence() {
+      const current = sequence;
+      sequence = (sequence + 1) & 0xff;
+      return current;
+    }
+
+    function buildProtocol(sysId, compId) {
+      if (node.mavlinkVersion === "2.0") {
+        return new MavLinkProtocolV2(sysId, compId);
+      }
+      return new MavLinkProtocolV1(sysId, compId);
+    }
+
+    function transmitBuffer(buffer, targetHost, targetPort) {
+      if (!connection || !buffer) {
+        return;
+      }
+
+      const output = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+
+      if (node.connectionType === "serial" || node.connectionType === "tcp") {
+        try {
+          connection.write(output);
+        } catch (writeErr) {
+          node.error(`Write error: ${writeErr.message}`);
+        }
+      } else if (node.connectionType === "udp") {
+        const host = targetHost || node.host;
+        const port = targetPort || node.port;
+        connection.send(output, port, host, (err) => {
+          if (err) {
+            node.error(`UDP send error: ${err.message}`);
+          }
+        });
+      }
+    }
 
     // Load MAVLink parser for selected dialect
     async function initParser() {
@@ -275,46 +360,71 @@ module.exports = function(RED) {
         const defs = await parseXMLDefinitions(xmlPath);
         node.context().global.set(`mavlink_defs_${node.id}`, defs);
 
-        // Load dialect-specific registry
-        const mavlinkMappings = require("node-mavlink");
-        const { MavLinkPacketSplitter, MavLinkPacketParser, minimal, common, ardupilotmega, uavionix, icarous, asluav, development, ualberta, storm32 } = mavlinkMappings;
+        activeRegistry = getRegistryForDialect(node.dialect);
+        sequence = 0;
 
-        // Build registry map for all supported dialects
-        const dialectRegistries = {
-          'minimal': minimal.REGISTRY,
-          'common': common.REGISTRY,
-          'ardupilotmega': ardupilotmega.REGISTRY,
-          'uavionix': uavionix.REGISTRY,
-          'icarous': icarous.REGISTRY,
-          'asluav': asluav.REGISTRY || asluav.ASLUAV?.REGISTRY,
-          'development': development.REGISTRY,
-          'ualberta': ualberta.REGISTRY,
-          'storm32': storm32.REGISTRY,
-        };
+        if (splitter && parser) {
+          splitter.unpipe(parser);
+        }
 
-        const registry = dialectRegistries[node.dialect] || common.REGISTRY;
+        if (splitter) {
+          splitter.removeAllListeners();
+        }
 
-        parser = new MavLinkPacketParser(registry, node.mavlinkVersion === "2.0" ? 2 : 1);
+        if (parser) {
+          parser.removeAllListeners();
+        }
 
-        // Create single packet splitter instance and set up event listener once
         splitter = new MavLinkPacketSplitter();
-        splitter.on("data", (packet) => {
-          try {
-            const message = parser.parse(packet);
+        parser = new MavLinkPacketParser();
 
-            // Publish to internal bus
+        splitter.on("error", (err) => {
+          node.warn(`Splitter error: ${err.message}`);
+        });
+
+        parser.on("error", (err) => {
+          node.warn(`Parser error: ${err.message}`);
+        });
+
+        splitter.pipe(parser);
+
+        parser.on("data", (packet) => {
+          try {
+            if (!activeRegistry) {
+              return;
+            }
+
+            const messageClass = activeRegistry[packet.header.msgid];
+
+            if (!messageClass) {
+              node.debug(`Unhandled MAVLink message id ${packet.header.msgid} for dialect ${node.dialect}`);
+              return;
+            }
+
+            const message = packet.protocol.data(packet.payload, messageClass);
+            const topic = messageClass.MSG_NAME || `MSG_${packet.header.msgid}`;
+            const headerInfo = {
+              systemId: packet.header.sysid,
+              componentId: packet.header.compid,
+              sequence: packet.header.seq,
+              messageId: packet.header.msgid,
+              timestamp: packet.header.timestamp,
+              protocol: packet.protocol.constructor.NAME || "unknown",
+            };
+
             node.context().flow.set("mavlink_last_received", {
-              name: message.name,
-              type: message.type,
-              systemId: message.header.systemId,
-              componentId: message.header.componentId,
-              payload: message
+              name: topic,
+              id: packet.header.msgid,
+              systemId: headerInfo.systemId,
+              componentId: headerInfo.componentId,
+              payload: message,
+              header: headerInfo,
             });
 
-            // Output to Node-RED flow
             node.send({
               payload: message,
-              topic: message.name
+              topic,
+              header: headerInfo,
             });
           } catch (e) {
             node.warn(`Parse error: ${e.message}`);
@@ -348,53 +458,52 @@ module.exports = function(RED) {
         // Get pending outgoing message from context
         const outgoing = node.context().flow.get("mavlink_outgoing");
 
-        if (outgoing && Array.isArray(outgoing.bytes)) {
-          // Send the message
-          if (connection) {
-            if (node.connectionType === "serial") {
-              connection.write(Buffer.from(outgoing.bytes));
-            } else if (node.connectionType === "udp") {
-              connection.send(Buffer.from(outgoing.bytes), node.port, node.host);
-            } else if (node.connectionType === "tcp") {
-              connection.write(Buffer.from(outgoing.bytes));
-            }
-          }
+        if (outgoing && outgoing.messageId !== undefined && outgoing.payload) {
+          try {
+            const targetDialect = outgoing.dialect || node.dialect;
+            const registryForMessage = getRegistryForDialect(targetDialect);
+            const messageClass = registryForMessage[outgoing.messageId];
 
-          // Clear from context
-          node.context().flow.set("mavlink_outgoing", null);
+            if (!messageClass) {
+              node.warn(`Outgoing message id ${outgoing.messageId} not found for dialect ${targetDialect}`);
+            } else {
+              const messageInstance = new messageClass();
+
+              if (Array.isArray(messageClass.FIELDS)) {
+                messageClass.FIELDS.forEach((field) => {
+                  const sourceName = field.source;
+                  if (Object.prototype.hasOwnProperty.call(outgoing.payload, sourceName)) {
+                    messageInstance[field.name] = outgoing.payload[sourceName];
+                  }
+                });
+              }
+
+              const sysId = Number.isInteger(outgoing.systemId) ? outgoing.systemId : 255;
+              const compId = Number.isInteger(outgoing.componentId) ? outgoing.componentId : 190;
+              const protocol = buildProtocol(sysId, compId);
+              const buffer = protocol.serialize(messageInstance, nextSequence());
+              transmitBuffer(buffer, outgoing.host, outgoing.port);
+            }
+          } catch (sendErr) {
+            node.warn(`Failed to serialize outgoing MAVLink message: ${sendErr.message}`);
+          } finally {
+            node.context().flow.set("mavlink_outgoing", null);
+          }
         }
 
         // Send HEARTBEAT message (MAVLink protocol requirement)
         try {
-          // Create HEARTBEAT message (using cached mavlinkCommon from module level)
-          // System ID 255 = Ground Control Station
-          // Component ID 190 = Generic companion computer
-          const heartbeat = new mavlinkCommon.HeartbeatMessage(
-            255,  // system_id (GCS)
-            190   // component_id (companion computer)
-          );
-
-          // Configure heartbeat fields
+          const heartbeat = new minimal.Heartbeat();
           heartbeat.type = 6;              // MAV_TYPE_GCS
           heartbeat.autopilot = 0;         // MAV_AUTOPILOT_GENERIC
           heartbeat.baseMode = 0;          // No specific mode
           heartbeat.customMode = 0;        // No custom mode
           heartbeat.systemStatus = 4;      // MAV_STATE_ACTIVE
-          heartbeat.mavlinkVersion = 3;    // MAVLink v2
+          heartbeat.mavlinkVersion = 3;    // MAVLink v2 indicator
 
-          // Serialize to bytes
-          const bytes = heartbeat.serialize();
-
-          // Send heartbeat
-          if (connection) {
-            if (node.connectionType === "serial") {
-              connection.write(Buffer.from(bytes));
-            } else if (node.connectionType === "udp") {
-              connection.send(Buffer.from(bytes), node.port, node.host);
-            } else if (node.connectionType === "tcp") {
-              connection.write(Buffer.from(bytes));
-            }
-          }
+          const heartbeatProtocol = buildProtocol(255, 190);
+          const buffer = heartbeatProtocol.serialize(heartbeat, nextSequence());
+          transmitBuffer(buffer);
         } catch (hbErr) {
           node.warn(`HEARTBEAT creation failed: ${hbErr.message}`);
         }
@@ -479,14 +588,22 @@ module.exports = function(RED) {
         heartbeatTimer = null;
       }
 
-      // Remove splitter event listeners to prevent leaks
+      if (splitter && parser) {
+        splitter.unpipe(parser);
+      }
+
       if (splitter) {
         splitter.removeAllListeners();
         splitter = null;
       }
 
-      // Null out parser
-      parser = null;
+      if (parser) {
+        parser.removeAllListeners();
+        parser = null;
+      }
+
+      activeRegistry = null;
+      sequence = 0;
 
       if (connection) {
         if (node.connectionType === "serial") {
