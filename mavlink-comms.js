@@ -291,6 +291,17 @@ module.exports = function(RED) {
       return current;
     }
 
+    // Event handler for immediate processing of outgoing messages
+    const onOutgoingMessage = (data) => {
+      // Only process messages for this flow
+      if (data.flowId === node.z) {
+        processOutgoingQueue();
+      }
+    };
+
+    // Listen for outgoing message events (enables instant transmission)
+    RED.events.on("mavlink:outgoing", onOutgoingMessage);
+
     function buildProtocol(sysId, compId) {
       if (node.mavlinkVersion === "2.0") {
         return new MavLinkProtocolV2(sysId, compId);
@@ -433,10 +444,9 @@ module.exports = function(RED) {
       }
     }
 
-    // Send heartbeat and check for outgoing messages
-    function sendHeartbeat() {
+    // Process all pending outgoing messages from queue
+    function processOutgoingQueue() {
       try {
-        // Process all pending outgoing messages from queue
         const queue = node.context().flow.get("mavlink_outgoing_queue") || [];
 
         while (queue.length > 0) {
@@ -476,26 +486,27 @@ module.exports = function(RED) {
 
         // Clear the queue after processing all messages
         node.context().flow.set("mavlink_outgoing_queue", []);
-
-        // Send HEARTBEAT message (MAVLink protocol requirement)
-        try {
-          const heartbeat = new minimal.Heartbeat();
-          heartbeat.type = 6;              // MAV_TYPE_GCS
-          heartbeat.autopilot = 0;         // MAV_AUTOPILOT_GENERIC
-          heartbeat.baseMode = 0;          // No specific mode
-          heartbeat.customMode = 0;        // No custom mode
-          heartbeat.systemStatus = 4;      // MAV_STATE_ACTIVE
-          heartbeat.mavlinkVersion = 3;    // MAVLink v2 indicator
-
-          const heartbeatProtocol = buildProtocol(255, 190);
-          const buffer = heartbeatProtocol.serialize(heartbeat, nextSequence());
-          transmitBuffer(buffer);
-        } catch (hbErr) {
-          node.warn(`HEARTBEAT creation failed: ${hbErr.message}`);
-        }
-
       } catch (err) {
-        node.warn(`Heartbeat timer error: ${err.message}`);
+        node.warn(`Queue processing error: ${err.message}`);
+      }
+    }
+
+    // Send heartbeat (MAVLink protocol requirement)
+    function sendHeartbeat() {
+      try {
+        const heartbeat = new minimal.Heartbeat();
+        heartbeat.type = 6;              // MAV_TYPE_GCS
+        heartbeat.autopilot = 0;         // MAV_AUTOPILOT_GENERIC
+        heartbeat.baseMode = 0;          // No specific mode
+        heartbeat.customMode = 0;        // No custom mode
+        heartbeat.systemStatus = 4;      // MAV_STATE_ACTIVE
+        heartbeat.mavlinkVersion = 3;    // MAVLink v2 indicator
+
+        const heartbeatProtocol = buildProtocol(255, 190);
+        const buffer = heartbeatProtocol.serialize(heartbeat, nextSequence());
+        transmitBuffer(buffer);
+      } catch (hbErr) {
+        node.warn(`HEARTBEAT creation failed: ${hbErr.message}`);
       }
     }
 
@@ -569,6 +580,9 @@ module.exports = function(RED) {
 
     // Cleanup
     node.on("close", (done) => {
+      // Remove event listener
+      RED.events.removeListener("mavlink:outgoing", onOutgoingMessage);
+
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
         heartbeatTimer = null;

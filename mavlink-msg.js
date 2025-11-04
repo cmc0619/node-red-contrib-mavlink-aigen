@@ -292,6 +292,9 @@ module.exports = function(RED) {
         });
         node.context().flow.set("mavlink_outgoing_queue", queue);
 
+        // Emit event to trigger immediate processing by comms nodes
+        RED.events.emit("mavlink:outgoing", { flowId: node.z });
+
         // Also output the message data for debugging/logging
         send({
           payload: {
