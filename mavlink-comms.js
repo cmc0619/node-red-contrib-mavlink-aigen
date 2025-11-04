@@ -572,6 +572,10 @@ module.exports = function(RED) {
         // Start heartbeat/outgoing message checker (1Hz)
         heartbeatTimer = setInterval(sendHeartbeat, 1000);
 
+        // Process any messages that were queued before event listener was ready
+        // (handles startup race condition with inject nodes)
+        processOutgoingQueue();
+
       } catch (err) {
         node.error(`Connection failed: ${err.message}`);
         node.status({ fill: "red", shape: "dot", text: "connection error" });
