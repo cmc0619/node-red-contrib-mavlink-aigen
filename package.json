@@ -26,7 +26,8 @@
   "node-red": {
     "nodes": {
       "mavlink-comms": "mavlink-comms.js",
-      "mavlink-msg": "mavlink-msg.js"
+      "mavlink-msg": "mavlink-msg.js",
+      "mavlink-mission": "mavlink-mission.js"
     }
   },
   "engines": {
