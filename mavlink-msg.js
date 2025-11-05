@@ -6,7 +6,7 @@ module.exports = function(RED) {
   const XML_DIR = path.join(RED.settings.userDir, "mavlink-xmls");
 
   // Cache for parsed XML definitions (keyed by dialect name)
-  const definitionsCache = {};
+  const definitionsCache = Object.create(null);  // Prevent prototype pollution
 
   // Parse XML to get message and enum definitions (with caching)
   async function parseXMLDefinitions(xmlPath) {
@@ -19,8 +19,8 @@ module.exports = function(RED) {
     const parser = new xml2js.Parser();
     const result = await parser.parseStringPromise(xml);
 
-    const enums = {};
-    const messages = {};
+    const enums = Object.create(null);  // Prevent prototype pollution
+    const messages = Object.create(null);  // Prevent prototype pollution
 
     // Extract enums
     if (result.mavlink?.enums?.[0]?.enum) {

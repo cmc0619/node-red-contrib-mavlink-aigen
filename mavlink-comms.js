@@ -45,7 +45,7 @@ module.exports = function(RED) {
     storm32: () => mergeRegistries(minimal.REGISTRY, common.REGISTRY, storm32.REGISTRY),
   };
 
-  const registryCache = {};
+  const registryCache = Object.create(null);  // Prevent prototype pollution
   function getRegistryForDialect(dialect) {
     if (!registryCache[dialect]) {
       const builder = DIALECT_REGISTRY_BUILDERS[dialect] || DIALECT_REGISTRY_BUILDERS.common;
@@ -178,8 +178,8 @@ module.exports = function(RED) {
     const parser = new xml2js.Parser();
     const result = await parser.parseStringPromise(xml);
 
-    const enums = {};
-    const messages = {};
+    const enums = Object.create(null);  // Prevent prototype pollution
+    const messages = Object.create(null);  // Prevent prototype pollution
 
     // Extract enums
     if (result.mavlink?.enums?.[0]?.enum) {
