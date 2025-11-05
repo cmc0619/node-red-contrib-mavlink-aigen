@@ -8,6 +8,11 @@ module.exports = function(RED) {
   // Cache for parsed XML definitions (keyed by dialect name)
   const definitionsCache = {};
 
+  // Clear cache when XMLs are updated
+  RED.events.on("mavlink:cache-clear", () => {
+    Object.keys(definitionsCache).forEach(k => delete definitionsCache[k]);
+  });
+
   // Parse XML to get message and enum definitions (with caching)
   async function parseXMLDefinitions(xmlPath) {
     // Check cache first
