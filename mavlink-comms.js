@@ -166,6 +166,9 @@ module.exports = function(RED) {
 
   // List available XMLs in storage
   function listXMLs() {
+    // Note: readdirSync blocks event loop but only affects admin UI responsiveness,
+    // not runtime MAVLink processing. Not worth async conversion complexity for rare
+    // admin operation. Line 64 also uses sync read at startup which is acceptable.
     const files = fs.readdirSync(XML_DIR).filter(f => f.endsWith(".xml"));
     const dialectMap = new Map();
 
