@@ -158,10 +158,13 @@ module.exports = function(RED) {
       }
 
       // Handle incoming MAVLink messages from comms node
-      if (msg.topic === "mavlink" && msg.payload && msg.payload.name) {
-        const msgName = msg.payload.name;
-        const msgPayload = msg.payload;
+      // mavlink-comms sets msg.topic to the message name (e.g., "MISSION_REQUEST")
+      // and msg.payload contains the decoded message fields
+      const msgName = msg.topic;
+      const msgPayload = msg.payload;
 
+      // Only process MISSION_* messages
+      if (msgName && msgName.startsWith("MISSION_") && msgPayload) {
         // Only process messages for our target system
         if (msgPayload.target_system && msgPayload.target_system !== 255 && msgPayload.target_system !== node.targetSystem) {
           return;
