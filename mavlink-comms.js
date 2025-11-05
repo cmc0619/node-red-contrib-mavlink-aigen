@@ -240,6 +240,9 @@ module.exports = function(RED) {
   RED.httpAdmin.post("/mavlink-comms/update-xmls", async (req, res) => {
     try {
       const result = await updateXMLs();
+      if (result.ok) {
+        RED.events.emit("mavlink:cache-clear");
+      }
       res.json(result);
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
@@ -273,6 +276,7 @@ module.exports = function(RED) {
 
       if (fs.existsSync(filepath)) {
         fs.unlinkSync(filepath);
+        RED.events.emit("mavlink:cache-clear");
         res.json({ ok: true });
       } else {
         res.status(404).json({ ok: false, error: "File not found" });

@@ -8,6 +8,11 @@ module.exports = function(RED) {
   // Cache for parsed XML definitions (keyed by dialect name)
   const definitionsCache = Object.create(null);  // Prevent prototype pollution
 
+  // Clear cache when XMLs are updated
+  RED.events.on("mavlink:cache-clear", () => {
+    Object.keys(definitionsCache).forEach(k => delete definitionsCache[k]);
+  });
+
   // Parse XML to get message and enum definitions (with caching)
   async function parseXMLDefinitions(xmlPath) {
     // Check cache first
@@ -323,7 +328,7 @@ module.exports = function(RED) {
           if (trimmed === "") {
             return NaN;
           }
-          if (/^[-+]?\d+(\.\d+)?$/.test(trimmed) || /^0x[0-9a-f]+$/i.test(trimmed)) {
+          if (/^[-+]?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(trimmed) || /^0x[0-9a-f]+$/i.test(trimmed)) {
             return Number(trimmed);
           }
           const shiftMatch = trimmed.match(/^([-+]?\d+)\s*<<\s*([-+]?\d+)$/);
