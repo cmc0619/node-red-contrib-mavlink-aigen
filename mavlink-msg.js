@@ -535,6 +535,8 @@ module.exports = function(RED) {
         node.context().flow.set("mavlink_outgoing_queue", queue);
 
         // Emit event to trigger immediate processing by comms nodes
+        // Note: node.z (flow ID) is always set by Node-RED core. If undefined, Node-RED
+        // itself is broken and many things will fail - not worth defensive guard check.
         RED.events.emit("mavlink:outgoing", { flowId: node.z });
 
         // Also output the message data for debugging/logging

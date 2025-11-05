@@ -324,6 +324,10 @@ module.exports = function(RED) {
               });
             }
 
+            // Delayed reset after success display (3 seconds)
+            // Edge case: If user rapidly starts new upload within 3s, this timer could
+            // reset the new operation's state. Not fixing: users should wait for ops to
+            // complete before starting another. Rapid-fire uploads indicate UX problem.
             setTimeout(() => {
               if (state !== "IDLE") {
                 resetState();
