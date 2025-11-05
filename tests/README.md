@@ -1,6 +1,13 @@
 # MAVLink Node-RED Testing Suite
 
-Automated test suite for validating MAVLink GCS nodes with a simulated drone.
+Comprehensive automated test suite for MAVLink GCS nodes with simulated drone responses.
+
+## Test Flows
+
+1. **simulated-drone-test.json** - Complete GCS + simulated drone with 3 test modes
+2. **telemetry-test.json** - Telemetry streaming and validation (ATTITUDE, GPS, BATTERY, etc.)
+3. **command-test.json** - Command protocol testing (ARM, TAKEOFF, LAND, RTL)
+4. **parameter-test.json** - Parameter read/write protocol
 
 ## Overview
 
@@ -178,11 +185,175 @@ To add new test scenarios:
 4. Update test verifier to check for new success/fail conditions
 5. Document expected behavior in this README
 
+---
+
+## Test Flow 2: Telemetry Test
+
+**File**: `telemetry-test.json`
+
+### Purpose
+Validates telemetry message handling with realistic simulated drone streaming common telemetry at 10Hz.
+
+### Features
+- **Simulated drone telemetry generator** - Streams at 10Hz with realistic flight motion
+- **Message types tested**:
+  - `HEARTBEAT` - Connection and system status
+  - `ATTITUDE` - Roll/pitch/yaw with rates (±15° roll, ±10° pitch)
+  - `GLOBAL_POSITION_INT` - GPS lat/lon/alt with movement
+  - `VFR_HUD` - Airspeed, groundspeed, heading, throttle, climb
+  - `SYS_STATUS` - Battery voltage, current, % remaining
+  - `GPS_RAW_INT` - GPS fix type, satellites, HDOP/VDOP
+- **Verification nodes** - Each message type has validator checking ranges and values
+- **Visual indicators** - Node status shows real-time values (altitude, battery %, etc.)
+
+### Usage
+1. Import `telemetry-test.json`
+2. Deploy flow
+3. Click **"Start Telemetry Stream"**
+4. Watch debug panel for PASS/FAIL results
+5. Verify node status indicators update in real-time
+6. Click **"Stop Telemetry Stream"** when done
+7. Click **"Show Test Summary"** for instructions
+
+### What's Tested
+- Telemetry parsing and field extraction
+- Value range validation (e.g., roll ±20°, battery 10-13V)
+- Message frequency (10Hz = 100ms intervals)
+- Coordinate system conversions (degE7 to degrees, etc.)
+- Scientific notation handling (battery current, speeds)
+
+### Expected Results
+All verifier nodes should show **green status** with values updating in real-time.
+
+---
+
+## Test Flow 3: Command Test
+
+**File**: `command-test.json`
+
+### Purpose
+Tests MAVLink command protocol with `COMMAND_LONG` messages and `COMMAND_ACK` responses.
+
+### Features
+- **Commands tested**:
+  - `MAV_CMD_COMPONENT_ARM_DISARM` (ARM/DISARM)
+  - `MAV_CMD_NAV_TAKEOFF` (with altitude parameter)
+  - `MAV_CMD_NAV_LAND`
+  - `MAV_CMD_NAV_RETURN_TO_LAUNCH`
+- **Simulated drone handler** - Responds to commands with realistic ACKs
+- **Result validation** - Verifies correct command ID and ACK result
+- **Sequence runner** - Automated full flight sequence
+
+### Usage
+
+**Individual Command Tests:**
+1. Import `command-test.json`
+2. Deploy flow
+3. Click any command inject: **Test: ARM**, **Test: TAKEOFF**, **Test: LAND**, **Test: RTL**, **Test: DISARM**
+4. Watch debug panel for COMMAND_ACK verification
+5. Verify node status shows PASS/FAIL
+
+**Automated Sequence:**
+1. Click **"Run Full Sequence"**
+2. Watches ARM → TAKEOFF (2s) → LAND (5s) → RTL (8s) → DISARM (10s) automatically
+3. All results appear in debug panel
+
+### What's Tested
+- Command message formatting
+- Parameter passing (e.g., TAKEOFF altitude)
+- COMMAND_ACK parsing
+- Result codes (0=ACCEPTED, 1=TEMP_REJECTED, 2=DENIED, 3=UNSUPPORTED)
+- Round-trip timing
+
+### Expected Results
+All commands should receive **COMMAND_ACK with result=0** (ACCEPTED).
+
+---
+
+## Test Flow 4: Parameter Test
+
+**File**: `parameter-test.json`
+
+### Purpose
+Tests parameter read/write protocol with simulated drone parameter storage.
+
+### Features
+- **Simulated drone parameters**:
+  - `TEST_PARAM_1` = 42.5 (scientific notation test)
+  - `TEST_PARAM_2` = 1e-3 (small scientific notation)
+  - `TEST_PARAM_3` = 2.5e6 (large scientific notation)
+  - `ARMING_CHECK` = 1 (UINT8)
+  - `BATT_CAPACITY` = 5000 (UINT16)
+- **Operations tested**:
+  - `PARAM_REQUEST_LIST` - Request all parameters
+  - `PARAM_SET` - Write parameter value
+  - `PARAM_REQUEST_READ` - Read single parameter (by ID or index)
+- **Verification** - Validates PARAM_VALUE responses
+
+### Usage
+
+**Request All Parameters:**
+1. Import `parameter-test.json`
+2. Deploy flow
+3. Click **"Request All Parameters"**
+4. Watch debug panel - should receive 5 PARAM_VALUE messages
+5. Verify all parameters received (index 0-4 of 5)
+
+**Set Parameter:**
+1. Click **"Set Parameter"** (sets TEST_PARAM_1 to 99.5)
+2. Verify PARAM_VALUE response confirms new value
+3. Click "Request All Parameters" again to verify persistence
+
+### What's Tested
+- PARAM_REQUEST_LIST protocol
+- PARAM_VALUE parsing
+- Parameter ID string handling (16 chars max)
+- Parameter types (REAL32, UINT8, UINT16, etc.)
+- Scientific notation in parameter values
+- PARAM_SET confirmation
+
+### Expected Results
+- Request all: Receive 5 parameters (0/5, 1/5, 2/5, 3/5, 4/5)
+- Set param: Receive confirmation with new value
+- All should show **green PASS status**
+
+---
+
+## Connection Architecture
+
+All test flows use localhost UDP for communication:
+
+```
+GCS Nodes (under test)        Simulated Drone
+  UDP:14550               ↔      UDP:14551
+```
+
+This allows multiple test flows to run simultaneously since each flow has its own comms nodes.
+
+---
+
+## Tips for Testing with Navio2
+
+When you're ready to test with real hardware:
+
+1. **Change connection in GCS comms node:**
+   - For **Serial/UART**: `connectionType: "serial"`, `serialPort: "/dev/ttyAMA0"`
+   - For **ArduPilot UDP**: `udpBindHost: "127.0.0.1"`, `udpBindPort: "14550"` (default)
+
+2. **Remove simulated drone comms** - Navio2 runs real ArduPilot
+
+3. **Adjust validation ranges** - Real telemetry will differ from simulated values
+
+4. **Monitor at lower rate** - Real drones may stream at 4Hz or adjustable rates
+
 ## Future Enhancements
 
-- [ ] Add parameter request/set tests
-- [ ] Test command (MAV_CMD_*) protocol
-- [ ] Add telemetry stream tests (position, attitude, etc)
+- [x] Add parameter request/set tests
+- [x] Test command (MAV_CMD_*) protocol
+- [x] Add telemetry stream tests (position, attitude, etc)
 - [ ] Export test results to JSON/CSV for CI/CD
 - [ ] Add performance metrics (latency, throughput)
 - [ ] Create dashboard UI for test control
+- [ ] Add mission protocol tests (waypoint upload/download)
+- [ ] Test fence and rally point protocols
+- [ ] Add data stream request tests (REQUEST_DATA_STREAM)
