@@ -124,9 +124,21 @@ module.exports = function(RED) {
   RED.httpAdmin.get("/mavlink-msg/dialects", async (req, res) => {
     try {
       const files = await fs.promises.readdir(XML_DIR);
-      const dialects = files
-        .filter(f => f.endsWith(".xml") && !f.includes("_"))
-        .map(f => f.replace(".xml", ""));
+
+      // Mirror the dialect detection logic used in mavlink-comms so the
+      // message builder sees the same list even when only versioned XMLs are
+      // present (e.g. common_20240303.xml).
+      const dialectSet = new Set();
+      const dialectRegex = /^(.+?)(?:_(\d{8}))?\.xml$/i;
+
+      files.forEach(file => {
+        const match = file.match(dialectRegex);
+        if (match) {
+          dialectSet.add(match[1]);
+        }
+      });
+
+      const dialects = Array.from(dialectSet).sort();
       res.json({ ok: true, dialects });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
