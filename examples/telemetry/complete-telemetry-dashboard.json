@@ -1,0 +1,1153 @@
+[
+    {
+        "id": "1cd89aae52724e74",
+        "type": "tab",
+        "label": "MAVLink: Telemetry Dashboard",
+        "disabled": false,
+        "info": "Unified telemetry dashboard combining battery, flight, position, ESC, vibration, terrain and EKF monitors.\\n\\nRequires: node-red-dashboard"
+    },
+    {
+        "id": "c168559fd1aa4775",
+        "type": "comment",
+        "z": "1cd89aae52724e74",
+        "name": "Connect mavlink-comms \u2192 Telemetry Router",
+        "info": "### MAVLink Telemetry Dashboard\\n\\n1. Install **node-red-dashboard**.\\n2. Wire the output of **mavlink-comms** to the **Telemetry Router** switch.\\n3. Deploy and open the dashboard at http://localhost:1880/ui.\\n\\nPanels expose battery, flight, GPS position, ESC telemetry, vibration, terrain and EKF state.",
+        "x": 310,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "2114d5e7dd61410f",
+        "type": "switch",
+        "z": "1cd89aae52724e74",
+        "name": "Telemetry Router",
+        "property": "topic",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "SYS_STATUS",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "BATTERY_STATUS",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "VFR_HUD",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "GLOBAL_POSITION_INT",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "ESC_TELEMETRY_1_TO_4",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "VIBRATION",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "TERRAIN_REPORT",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "EKF_STATUS_REPORT",
+                "vt": "str"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 8,
+        "x": 170,
+        "y": 160,
+        "wires": [
+            [
+                "1fd96f84c97a4cbd"
+            ],
+            [
+                "1fd96f84c97a4cbd"
+            ],
+            [
+                "97da38a8f91e4a3c"
+            ],
+            [
+                "1e5b0f3bdae04fae"
+            ],
+            [
+                "c68b271b0f614bfc"
+            ],
+            [
+                "6b4b9fee4e914283"
+            ],
+            [
+                "b817b7271be94375"
+            ],
+            [
+                "96fbc7d21f0c4e02"
+            ]
+        ]
+    },
+    {
+        "id": "1fd96f84c97a4cbd",
+        "type": "function",
+        "z": "1cd89aae52724e74",
+        "name": "Parse Battery",
+        "func": "const state = context.get('state') || {\n    voltage: 0,\n    current: 0,\n    percent: 0,\n    consumed: null,\n    temperature: null\n};\n\nif (msg.topic === 'BATTERY_STATUS') {\n    const bat = msg.payload || {};\n    const voltages = Array.isArray(bat.voltages) ? bat.voltages.filter(v => typeof v === 'number' && v > 0) : [];\n    if (voltages.length) {\n        state.voltage = voltages.reduce((sum, v) => sum + v, 0) / 1000; // mV \u2192 V\n    }\n    if (typeof bat.current_battery === 'number' && bat.current_battery !== -1) {\n        state.current = bat.current_battery / 100; // cA \u2192 A\n    }\n    if (typeof bat.battery_remaining === 'number' && bat.battery_remaining >= 0) {\n        state.percent = bat.battery_remaining;\n    }\n    if (typeof bat.current_consumed === 'number' && bat.current_consumed >= 0) {\n        state.consumed = bat.current_consumed / 1000; // mAh \u2192 Ah\n    }\n    if (typeof bat.temperature === 'number' && bat.temperature > -32768) {\n        state.temperature = bat.temperature / 100; // cdegC \u2192 \u00b0C\n    }\n} else if (msg.topic === 'SYS_STATUS') {\n    const sys = msg.payload || {};\n    if (typeof sys.voltage_battery === 'number' && sys.voltage_battery > 0) {\n        state.voltage = sys.voltage_battery / 1000; // mV \u2192 V\n    }\n    if (typeof sys.current_battery === 'number' && sys.current_battery !== -1) {\n        state.current = sys.current_battery / 100; // cA \u2192 A\n    }\n    if (typeof sys.battery_remaining === 'number' && sys.battery_remaining >= 0) {\n        state.percent = sys.battery_remaining;\n    }\n}\n\ncontext.set('state', state);\n\nconst gaugeMsg = { payload: Number.isFinite(state.percent) ? state.percent : 0, topic: 'battery/percent' };\nconst voltageMsg = { payload: state.voltage > 0 ? state.voltage.toFixed(2) : '0.00', topic: 'battery/voltage' };\nconst currentMsg = { payload: state.current.toFixed(2), topic: 'battery/current' };\nconst consumedMsg = state.consumed != null ? { payload: state.consumed.toFixed(2), topic: 'battery/consumed' } : null;\nconst tempMsg = state.temperature != null ? { payload: state.temperature.toFixed(1), topic: 'battery/temperature' } : null;\nconst chartMsgs = [\n    { payload: state.voltage || 0, topic: 'Voltage (V)' },\n    { payload: state.current || 0, topic: 'Current (A)' },\n    { payload: state.percent || 0, topic: 'Remaining (%)' }\n];\n\nconst lowThreshold = 20;\nconst toastMsg = state.percent != null && state.percent <= lowThreshold\n    ? { payload: `\u26a0\ufe0f Battery low: ${state.percent.toFixed(0)}% (${state.voltage.toFixed(1)} V)`, position: 'top right', timeout: 5 }\n    : null;\n\nreturn [\n    [gaugeMsg],\n    [voltageMsg],\n    [currentMsg],\n    consumedMsg ? [consumedMsg] : [],\n    tempMsg ? [tempMsg] : [],\n    chartMsgs,\n    toastMsg ? [toastMsg] : []\n];",
+        "outputs": 7,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 450,
+        "y": 140,
+        "wires": [
+            [
+                "92ea97dfc1664d04"
+            ],
+            [
+                "3da75415f0e24248"
+            ],
+            [
+                "d5308ac405174d78"
+            ],
+            [
+                "a31c8254fee8479e"
+            ],
+            [
+                "92041e258d904169"
+            ],
+            [
+                "e5ba1bd8974e4696"
+            ],
+            [
+                "57dd0a2bac84466f"
+            ]
+        ]
+    },
+    {
+        "id": "97da38a8f91e4a3c",
+        "type": "function",
+        "z": "1cd89aae52724e74",
+        "name": "Parse Flight Data",
+        "func": "const hud = msg.payload || {};\nconst altitude = typeof hud.alt === 'number' ? hud.alt : 0;\nconst airspeed = typeof hud.airspeed === 'number' ? hud.airspeed : 0;\nconst groundspeed = typeof hud.groundspeed === 'number' ? hud.groundspeed : 0;\nconst climb = typeof hud.climb === 'number' ? hud.climb : 0;\nconst heading = typeof hud.heading === 'number' ? hud.heading : 0;\n\nconst gaugeMsg = { payload: altitude, topic: 'flight/altitude' };\nconst groundMsg = { payload: `${groundspeed.toFixed(1)} m/s`, topic: 'flight/groundspeed' };\nconst airMsg = { payload: `${airspeed.toFixed(1)} m/s`, topic: 'flight/airspeed' };\nconst climbMsg = { payload: `${climb.toFixed(1)} m/s`, topic: 'flight/climb' };\nconst headingMsg = { payload: `${heading.toFixed(0)}\u00b0`, topic: 'flight/heading' };\nconst speedChart = [\n    { payload: groundspeed, topic: 'Groundspeed (m/s)' },\n    { payload: airspeed, topic: 'Airspeed (m/s)' }\n];\nconst altitudeChart = [{ payload: altitude, topic: 'Altitude (m)' }];\n\nreturn [\n    [gaugeMsg],\n    [groundMsg],\n    [airMsg],\n    [climbMsg],\n    [headingMsg],\n    speedChart,\n    altitudeChart\n];",
+        "outputs": 7,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 440,
+        "y": 320,
+        "wires": [
+            [
+                "cd1f7da4982847ee"
+            ],
+            [
+                "9c9940e6eecb428b"
+            ],
+            [
+                "c0b809409a9645ad"
+            ],
+            [
+                "c010229d7aa64a0c"
+            ],
+            [
+                "807431de10134966"
+            ],
+            [
+                "54f1030757bc4ac1"
+            ],
+            [
+                "a63e421d2a364e1d"
+            ]
+        ]
+    },
+    {
+        "id": "1e5b0f3bdae04fae",
+        "type": "function",
+        "z": "1cd89aae52724e74",
+        "name": "Parse GPS Position",
+        "func": "const pos = msg.payload || {};\nconst lat = typeof pos.lat === 'number' ? pos.lat / 1e7 : null;\nconst lon = typeof pos.lon === 'number' ? pos.lon / 1e7 : null;\nconst alt = typeof pos.alt === 'number' ? pos.alt / 1000 : null; // mm \u2192 m\nconst relAlt = typeof pos.relative_alt === 'number' ? pos.relative_alt / 1000 : null;\nconst hdg = typeof pos.hdg === 'number' && pos.hdg !== 65535 ? pos.hdg / 100 : null;\n\nconst latMsg = { payload: lat != null ? lat.toFixed(7) : '\u2014', topic: 'position/lat' };\nconst lonMsg = { payload: lon != null ? lon.toFixed(7) : '\u2014', topic: 'position/lon' };\nconst altMsg = { payload: alt != null ? `${alt.toFixed(1)} m AMSL` : '\u2014', topic: 'position/alt' };\nconst relAltMsg = { payload: relAlt != null ? `${relAlt.toFixed(1)} m AGL` : '\u2014', topic: 'position/relative' };\nconst headingMsg = { payload: hdg != null ? `${hdg.toFixed(1)}\u00b0` : '\u2014', topic: 'position/track' };\nconst trackChart = [\n    lat != null ? { payload: lat, topic: 'Latitude (\u00b0)' } : null,\n    lon != null ? { payload: lon, topic: 'Longitude (\u00b0)' } : null,\n    relAlt != null ? { payload: relAlt, topic: 'Rel Alt (m)' } : null\n].filter(Boolean);\n\nreturn [\n    [latMsg],\n    [lonMsg],\n    [altMsg],\n    [relAltMsg],\n    [headingMsg],\n    trackChart\n];",
+        "outputs": 6,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 440,
+        "y": 460,
+        "wires": [
+            [
+                "225e3cf2ddad44e4"
+            ],
+            [
+                "eeac4dac500d494c"
+            ],
+            [
+                "f155bb9e9d6046ea"
+            ],
+            [
+                "ecf105fb284140c9"
+            ],
+            [
+                "77359bad63f64e53"
+            ],
+            [
+                "c4477831dd7044cd"
+            ]
+        ]
+    },
+    {
+        "id": "c68b271b0f614bfc",
+        "type": "function",
+        "z": "1cd89aae52724e74",
+        "name": "Parse ESC Telemetry",
+        "func": "const esc = msg.payload || {};\nconst count = typeof esc.count === 'number' && esc.count > 0 ? esc.count : 4;\nconst rpm = Array.isArray(esc.rpm) ? esc.rpm : [];\nconst current = Array.isArray(esc.current) ? esc.current : [];\nconst temperature = Array.isArray(esc.temperature) ? esc.temperature : [];\nconst voltage = Array.isArray(esc.voltage) ? esc.voltage : [];\n\nconst table = [];\nconst rpmMsgs = [];\nconst currentMsgs = [];\nconst tempMsgs = [];\nconst voltMsgs = [];\n\nfor (let i = 0; i < count; i += 1) {\n    const escId = i + 1;\n    const rpmVal = typeof rpm[i] === 'number' ? rpm[i] : null;\n    const currentVal = typeof current[i] === 'number' ? current[i] / 100 : null; // cA \u2192 A\n    const tempVal = typeof temperature[i] === 'number' ? temperature[i] / 10 : null; // 0.1\u00b0C\n    const voltVal = typeof voltage[i] === 'number' ? voltage[i] / 100 : null; // 0.01V\n\n    table.push({\n        esc: escId,\n        rpm: rpmVal != null ? rpmVal : '\u2014',\n        current: currentVal != null ? currentVal.toFixed(2) : '\u2014',\n        temp: tempVal != null ? tempVal.toFixed(1) : '\u2014',\n        voltage: voltVal != null ? voltVal.toFixed(2) : '\u2014'\n    });\n\n    if (rpmVal != null) rpmMsgs.push({ payload: rpmVal, topic: `ESC ${escId}` });\n    if (currentVal != null) currentMsgs.push({ payload: currentVal, topic: `ESC ${escId}` });\n    if (tempVal != null) tempMsgs.push({ payload: tempVal, topic: `ESC ${escId}` });\n    if (voltVal != null) voltMsgs.push({ payload: voltVal, topic: `ESC ${escId}` });\n}\n\nreturn [\n    [{ payload: table }],\n    rpmMsgs,\n    currentMsgs,\n    tempMsgs,\n    voltMsgs\n];",
+        "outputs": 5,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 620,
+        "wires": [
+            [
+                "5a3c8b9196a24e4a"
+            ],
+            [
+                "9a1bdea86923427d"
+            ],
+            [
+                "0cd933d098fc4b8d"
+            ],
+            [
+                "0f832c09727e444b"
+            ],
+            [
+                "fd78f9fa5c73419e"
+            ]
+        ]
+    },
+    {
+        "id": "6b4b9fee4e914283",
+        "type": "function",
+        "z": "1cd89aae52724e74",
+        "name": "Parse Vibration",
+        "func": "const vib = msg.payload || {};\nconst vibX = typeof vib.vibration_x === 'number' ? vib.vibration_x : 0;\nconst vibY = typeof vib.vibration_y === 'number' ? vib.vibration_y : 0;\nconst vibZ = typeof vib.vibration_z === 'number' ? vib.vibration_z : 0;\nconst clip0 = typeof vib.clipping_0 === 'number' ? vib.clipping_0 : 0;\nconst clip1 = typeof vib.clipping_1 === 'number' ? vib.clipping_1 : 0;\nconst clip2 = typeof vib.clipping_2 === 'number' ? vib.clipping_2 : 0;\n\nconst chartMsgs = [\n    { payload: vibX, topic: 'X (m/s\u00b2)' },\n    { payload: vibY, topic: 'Y (m/s\u00b2)' },\n    { payload: vibZ, topic: 'Z (m/s\u00b2)' }\n];\nconst clipMsg = { payload: `Clipping: ${clip0}/${clip1}/${clip2}`, topic: 'vibration/clipping' };\n\nreturn [chartMsgs, [clipMsg]];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 760,
+        "wires": [
+            [
+                "6e8fb489902e4c1d"
+            ],
+            [
+                "cbc6db7c0ce94ace"
+            ]
+        ]
+    },
+    {
+        "id": "b817b7271be94375",
+        "type": "function",
+        "z": "1cd89aae52724e74",
+        "name": "Parse Terrain",
+        "func": "const terrain = msg.payload || {};\nconst terrainHeight = typeof terrain.terrainHeight === 'number' ? terrain.terrainHeight : null;\nconst currentHeight = typeof terrain.currentHeight === 'number' ? terrain.currentHeight : null;\nconst pending = typeof terrain.pending === 'number' ? terrain.pending : null;\nconst loaded = typeof terrain.loaded === 'number' ? terrain.loaded : null;\nconst spacing = typeof terrain.spacing === 'number' ? terrain.spacing : null;\n\nconst heightMsg = { payload: terrainHeight != null ? `${terrainHeight.toFixed(1)} m` : '\u2014', topic: 'terrain/height' };\nconst clearanceMsg = { payload: terrainHeight != null && currentHeight != null ? `${(terrainHeight - currentHeight).toFixed(1)} m clearance` : '\u2014', topic: 'terrain/clearance' };\nconst statusMsg = { payload: `Tiles loaded: ${loaded != null ? loaded : '\u2014'} / pending: ${pending != null ? pending : '\u2014'} / spacing: ${spacing != null ? spacing : '\u2014'} m`, topic: 'terrain/status' };\n\nreturn [\n    [heightMsg],\n    [clearanceMsg],\n    [statusMsg]\n];",
+        "outputs": 3,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 880,
+        "wires": [
+            [
+                "3dd412f0ace94010"
+            ],
+            [
+                "02b7320ac4d7487b"
+            ],
+            [
+                "ff913410f5fe44e9"
+            ]
+        ]
+    },
+    {
+        "id": "96fbc7d21f0c4e02",
+        "type": "function",
+        "z": "1cd89aae52724e74",
+        "name": "Parse EKF",
+        "func": "const ekf = msg.payload || {};\nconst velocityVar = typeof ekf.velocity_variance === 'number' ? ekf.velocity_variance : null;\nconst posHorizVar = typeof ekf.pos_horiz_variance === 'number' ? ekf.pos_horiz_variance : null;\nconst posVertVar = typeof ekf.pos_vert_variance === 'number' ? ekf.pos_vert_variance : null;\nconst compassVar = typeof ekf.compass_variance === 'number' ? ekf.compass_variance : null;\nconst terrainVar = typeof ekf.terrain_alt_variance === 'number' ? ekf.terrain_alt_variance : null;\nconst flags = typeof ekf.flags === 'number' ? ekf.flags : 0;\n\nconst bits = [\n    { bit: 0, label: 'ATTITUDE' },\n    { bit: 1, label: 'VEL HORIZ' },\n    { bit: 2, label: 'VEL VERT' },\n    { bit: 3, label: 'POS HORIZ REL' },\n    { bit: 4, label: 'POS HORIZ ABS' },\n    { bit: 5, label: 'POS VERT ABS' },\n    { bit: 6, label: 'POS VERT AGL' },\n    { bit: 7, label: 'CONST POS' },\n    { bit: 8, label: 'PRED POS REL' },\n    { bit: 9, label: 'PRED POS ABS' },\n    { bit: 10, label: 'GPS GLITCH' },\n    { bit: 11, label: 'ACCEL ERROR' }\n];\n\nconst statuses = bits.map(b => {\n    const set = (flags & (1 << b.bit)) !== 0;\n    return `${set ? '\u2714' : '\u26a0'} ${b.label}`;\n}).join(' | ');\n\nconst statusMsg = { payload: statuses, topic: 'ekf/status' };\nconst chartMsgs = [\n    velocityVar != null ? { payload: velocityVar, topic: 'Velocity' } : null,\n    posHorizVar != null ? { payload: posHorizVar, topic: 'Pos Horiz' } : null,\n    posVertVar != null ? { payload: posVertVar, topic: 'Pos Vert' } : null,\n    compassVar != null ? { payload: compassVar, topic: 'Compass' } : null,\n    terrainVar != null ? { payload: terrainVar, topic: 'Terrain Alt' } : null\n].filter(Boolean);\n\nreturn [[statusMsg], chartMsgs];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 1020,
+        "wires": [
+            [
+                "6ff4c7ba86024bec"
+            ],
+            [
+                "1e668f9bb92542dd"
+            ]
+        ]
+    },
+    {
+        "id": "92ea97dfc1664d04",
+        "type": "ui_gauge",
+        "z": "1cd89aae52724e74",
+        "name": "Battery %",
+        "group": "0d8301aad12d4a87",
+        "order": 1,
+        "width": 4,
+        "height": 4,
+        "gtype": "gage",
+        "title": "Battery",
+        "label": "%",
+        "format": "{{value | number:0}}",
+        "min": 0,
+        "max": "100",
+        "colors": [
+            "#d9534f",
+            "#f0ad4e",
+            "#5cb85c"
+        ],
+        "seg1": "20",
+        "seg2": "50",
+        "className": "",
+        "x": 770,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "3da75415f0e24248",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "0d8301aad12d4a87",
+        "order": 2,
+        "width": 4,
+        "height": 1,
+        "name": "Voltage",
+        "label": "Voltage",
+        "format": "{{msg.payload}} V",
+        "layout": "row-spread",
+        "className": "",
+        "x": 770,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "d5308ac405174d78",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "0d8301aad12d4a87",
+        "order": 3,
+        "width": 4,
+        "height": 1,
+        "name": "Current",
+        "label": "Current",
+        "format": "{{msg.payload}} A",
+        "layout": "row-spread",
+        "className": "",
+        "x": 770,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "a31c8254fee8479e",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "0d8301aad12d4a87",
+        "order": 4,
+        "width": 4,
+        "height": 1,
+        "name": "Consumed",
+        "label": "Consumed",
+        "format": "{{msg.payload}} Ah",
+        "layout": "row-spread",
+        "className": "",
+        "x": 780,
+        "y": 180,
+        "wires": []
+    },
+    {
+        "id": "92041e258d904169",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "0d8301aad12d4a87",
+        "order": 5,
+        "width": 4,
+        "height": 1,
+        "name": "Temperature",
+        "label": "Temperature",
+        "format": "{{msg.payload}} \u00b0C",
+        "layout": "row-spread",
+        "className": "",
+        "x": 790,
+        "y": 220,
+        "wires": []
+    },
+    {
+        "id": "e5ba1bd8974e4696",
+        "type": "ui_chart",
+        "z": "1cd89aae52724e74",
+        "name": "Battery Trend",
+        "group": "0d8301aad12d4a87",
+        "order": 6,
+        "width": 12,
+        "height": 4,
+        "label": "Battery Trend",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "Waiting for battery data\u2026",
+        "dot": false,
+        "ymin": "0",
+        "ymax": "",
+        "removeOlder": "600",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "60",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#0275d8",
+            "#5bc0de",
+            "#f0ad4e"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "x": 790,
+        "y": 260,
+        "wires": []
+    },
+    {
+        "id": "57dd0a2bac84466f",
+        "type": "ui_toast",
+        "z": "1cd89aae52724e74",
+        "position": "top right",
+        "displayTime": "5",
+        "highlight": "red",
+        "outputs": 0,
+        "ok": "OK",
+        "cancel": "Cancel",
+        "topic": "",
+        "name": "Battery Alerts",
+        "group": "0d8301aad12d4a87",
+        "order": 7,
+        "width": 0,
+        "height": 0,
+        "x": 780,
+        "y": 300,
+        "wires": []
+    },
+    {
+        "id": "cd1f7da4982847ee",
+        "type": "ui_gauge",
+        "z": "1cd89aae52724e74",
+        "name": "Altitude",
+        "group": "6e774745f7fd4fa6",
+        "order": 1,
+        "width": 4,
+        "height": 4,
+        "gtype": "gage",
+        "title": "Altitude",
+        "label": "m",
+        "format": "{{value | number:1}}",
+        "min": 0,
+        "max": "500",
+        "colors": [
+            "#5bc0de",
+            "#0275d8",
+            "#292b2c"
+        ],
+        "seg1": "100",
+        "seg2": "300",
+        "className": "",
+        "x": 760,
+        "y": 360,
+        "wires": []
+    },
+    {
+        "id": "9c9940e6eecb428b",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "6e774745f7fd4fa6",
+        "order": 2,
+        "width": 4,
+        "height": 1,
+        "name": "Groundspeed",
+        "label": "Groundspeed",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 780,
+        "y": 400,
+        "wires": []
+    },
+    {
+        "id": "c0b809409a9645ad",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "6e774745f7fd4fa6",
+        "order": 3,
+        "width": 4,
+        "height": 1,
+        "name": "Airspeed",
+        "label": "Airspeed",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 770,
+        "y": 440,
+        "wires": []
+    },
+    {
+        "id": "c010229d7aa64a0c",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "6e774745f7fd4fa6",
+        "order": 4,
+        "width": 4,
+        "height": 1,
+        "name": "Climb",
+        "label": "Climb",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 770,
+        "y": 480,
+        "wires": []
+    },
+    {
+        "id": "807431de10134966",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "6e774745f7fd4fa6",
+        "order": 5,
+        "width": 4,
+        "height": 1,
+        "name": "Heading",
+        "label": "Heading",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 770,
+        "y": 520,
+        "wires": []
+    },
+    {
+        "id": "54f1030757bc4ac1",
+        "type": "ui_chart",
+        "z": "1cd89aae52724e74",
+        "name": "Speed Trend",
+        "group": "6e774745f7fd4fa6",
+        "order": 6,
+        "width": 12,
+        "height": 4,
+        "label": "Speed Trend",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "Waiting for VFR_HUD\u2026",
+        "dot": false,
+        "ymin": "0",
+        "ymax": "",
+        "removeOlder": "600",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "60",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#5bc0de",
+            "#5cb85c"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "x": 780,
+        "y": 560,
+        "wires": []
+    },
+    {
+        "id": "a63e421d2a364e1d",
+        "type": "ui_chart",
+        "z": "1cd89aae52724e74",
+        "name": "Altitude Trend",
+        "group": "6e774745f7fd4fa6",
+        "order": 7,
+        "width": 12,
+        "height": 4,
+        "label": "Altitude Trend",
+        "chartType": "line",
+        "legend": "false",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "Waiting for altitude\u2026",
+        "dot": false,
+        "ymin": "0",
+        "ymax": "",
+        "removeOlder": "600",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "60",
+        "cutout": 0,
+        "useOneColor": true,
+        "useUTC": false,
+        "colors": [
+            "#0275d8"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "x": 790,
+        "y": 600,
+        "wires": []
+    },
+    {
+        "id": "225e3cf2ddad44e4",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "760aee548fa74306",
+        "order": 1,
+        "width": 4,
+        "height": 1,
+        "name": "Latitude",
+        "label": "Latitude",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 770,
+        "y": 660,
+        "wires": []
+    },
+    {
+        "id": "eeac4dac500d494c",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "760aee548fa74306",
+        "order": 2,
+        "width": 4,
+        "height": 1,
+        "name": "Longitude",
+        "label": "Longitude",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 780,
+        "y": 700,
+        "wires": []
+    },
+    {
+        "id": "f155bb9e9d6046ea",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "760aee548fa74306",
+        "order": 3,
+        "width": 4,
+        "height": 1,
+        "name": "Altitude AMSL",
+        "label": "Altitude AMSL",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 790,
+        "y": 740,
+        "wires": []
+    },
+    {
+        "id": "ecf105fb284140c9",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "760aee548fa74306",
+        "order": 4,
+        "width": 4,
+        "height": 1,
+        "name": "Altitude AGL",
+        "label": "Altitude AGL",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 780,
+        "y": 780,
+        "wires": []
+    },
+    {
+        "id": "77359bad63f64e53",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "760aee548fa74306",
+        "order": 5,
+        "width": 4,
+        "height": 1,
+        "name": "Track",
+        "label": "Track",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 770,
+        "y": 820,
+        "wires": []
+    },
+    {
+        "id": "c4477831dd7044cd",
+        "type": "ui_chart",
+        "z": "1cd89aae52724e74",
+        "name": "Position Trend",
+        "group": "760aee548fa74306",
+        "order": 6,
+        "width": 12,
+        "height": 4,
+        "label": "Position Trend",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "Waiting for GPS\u2026",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": "600",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "60",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#5cb85c",
+            "#f0ad4e",
+            "#d9534f"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "x": 800,
+        "y": 860,
+        "wires": []
+    },
+    {
+        "id": "5a3c8b9196a24e4a",
+        "type": "ui_template",
+        "z": "1cd89aae52724e74",
+        "group": "776ab54996b14b50",
+        "name": "ESC Summary",
+        "order": 1,
+        "width": 12,
+        "height": 4,
+        "format": "<table class=\"nr-dashboard-card\"><thead><tr><th>ESC</th><th>RPM</th><th>Current (A)</th><th>Temp (\u00b0C)</th><th>Voltage (V)</th></tr></thead><tbody><tr ng-repeat=\"row in msg.payload\"><td>{{row.esc}}</td><td>{{row.rpm}}</td><td>{{row.current}}</td><td>{{row.temp}}</td><td>{{row.voltage}}</td></tr></tbody></table>",
+        "storeOutMessages": false,
+        "fwdInMessages": false,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 790,
+        "y": 640,
+        "wires": []
+    },
+    {
+        "id": "9a1bdea86923427d",
+        "type": "ui_chart",
+        "z": "1cd89aae52724e74",
+        "name": "ESC RPM",
+        "group": "776ab54996b14b50",
+        "order": 2,
+        "width": 12,
+        "height": 4,
+        "label": "ESC RPM",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "Waiting for ESC telemetry\u2026",
+        "dot": false,
+        "ymin": "0",
+        "ymax": "",
+        "removeOlder": "600",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "60",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#d9534f",
+            "#f0ad4e",
+            "#5cb85c",
+            "#0275d8"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "x": 800,
+        "y": 680,
+        "wires": []
+    },
+    {
+        "id": "0cd933d098fc4b8d",
+        "type": "ui_chart",
+        "z": "1cd89aae52724e74",
+        "name": "ESC Current",
+        "group": "776ab54996b14b50",
+        "order": 3,
+        "width": 12,
+        "height": 4,
+        "label": "ESC Current",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "Waiting for ESC telemetry\u2026",
+        "dot": false,
+        "ymin": "0",
+        "ymax": "",
+        "removeOlder": "600",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "60",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#5cb85c",
+            "#0275d8",
+            "#5bc0de",
+            "#292b2c"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "x": 800,
+        "y": 720,
+        "wires": []
+    },
+    {
+        "id": "0f832c09727e444b",
+        "type": "ui_chart",
+        "z": "1cd89aae52724e74",
+        "name": "ESC Temp",
+        "group": "776ab54996b14b50",
+        "order": 4,
+        "width": 12,
+        "height": 4,
+        "label": "ESC Temperature",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "Waiting for ESC telemetry\u2026",
+        "dot": false,
+        "ymin": "0",
+        "ymax": "",
+        "removeOlder": "600",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "60",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#f0ad4e",
+            "#d9534f",
+            "#292b2c",
+            "#5bc0de"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "x": 800,
+        "y": 760,
+        "wires": []
+    },
+    {
+        "id": "fd78f9fa5c73419e",
+        "type": "ui_chart",
+        "z": "1cd89aae52724e74",
+        "name": "ESC Voltage",
+        "group": "776ab54996b14b50",
+        "order": 5,
+        "width": 12,
+        "height": 4,
+        "label": "ESC Voltage",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "Waiting for ESC telemetry\u2026",
+        "dot": false,
+        "ymin": "0",
+        "ymax": "",
+        "removeOlder": "600",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "60",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#5bc0de",
+            "#0275d8",
+            "#292b2c",
+            "#5cb85c"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "x": 800,
+        "y": 800,
+        "wires": []
+    },
+    {
+        "id": "6e8fb489902e4c1d",
+        "type": "ui_chart",
+        "z": "1cd89aae52724e74",
+        "name": "Vibration",
+        "group": "110a3ccb22044630",
+        "order": 1,
+        "width": 12,
+        "height": 4,
+        "label": "Vibration",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "Waiting for vibration data\u2026",
+        "dot": false,
+        "ymin": "0",
+        "ymax": "",
+        "removeOlder": "600",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "60",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#5bc0de",
+            "#5cb85c",
+            "#f0ad4e"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "x": 790,
+        "y": 900,
+        "wires": []
+    },
+    {
+        "id": "cbc6db7c0ce94ace",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "110a3ccb22044630",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "name": "Clipping",
+        "label": "Clipping",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 790,
+        "y": 940,
+        "wires": []
+    },
+    {
+        "id": "3dd412f0ace94010",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "cc458bc7a1694df2",
+        "order": 1,
+        "width": 4,
+        "height": 1,
+        "name": "Terrain Height",
+        "label": "Terrain Height",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 780,
+        "y": 980,
+        "wires": []
+    },
+    {
+        "id": "02b7320ac4d7487b",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "cc458bc7a1694df2",
+        "order": 2,
+        "width": 4,
+        "height": 1,
+        "name": "Clearance",
+        "label": "Clearance",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 780,
+        "y": 1020,
+        "wires": []
+    },
+    {
+        "id": "ff913410f5fe44e9",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "cc458bc7a1694df2",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "name": "Terrain Status",
+        "label": "Terrain Status",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 790,
+        "y": 1060,
+        "wires": []
+    },
+    {
+        "id": "6ff4c7ba86024bec",
+        "type": "ui_text",
+        "z": "1cd89aae52724e74",
+        "group": "f44f94b550784331",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "name": "EKF Status",
+        "label": "EKF Flags",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 780,
+        "y": 1100,
+        "wires": []
+    },
+    {
+        "id": "1e668f9bb92542dd",
+        "type": "ui_chart",
+        "z": "1cd89aae52724e74",
+        "name": "EKF Variances",
+        "group": "f44f94b550784331",
+        "order": 2,
+        "width": 12,
+        "height": 4,
+        "label": "EKF Variances",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "Waiting for EKF data\u2026",
+        "dot": false,
+        "ymin": "0",
+        "ymax": "",
+        "removeOlder": "600",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "60",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#0275d8",
+            "#5cb85c",
+            "#f0ad4e",
+            "#d9534f",
+            "#292b2c"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "x": 790,
+        "y": 1140,
+        "wires": []
+    },
+    {
+        "id": "0d8301aad12d4a87",
+        "type": "ui_group",
+        "name": "Battery",
+        "tab": "b948f38578d0479b",
+        "order": 1,
+        "disp": true,
+        "width": "12",
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "6e774745f7fd4fa6",
+        "type": "ui_group",
+        "name": "Flight Data",
+        "tab": "b948f38578d0479b",
+        "order": 2,
+        "disp": true,
+        "width": "12",
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "760aee548fa74306",
+        "type": "ui_group",
+        "name": "Position",
+        "tab": "b948f38578d0479b",
+        "order": 3,
+        "disp": true,
+        "width": "12",
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "776ab54996b14b50",
+        "type": "ui_group",
+        "name": "ESC Telemetry",
+        "tab": "b948f38578d0479b",
+        "order": 4,
+        "disp": true,
+        "width": "12",
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "110a3ccb22044630",
+        "type": "ui_group",
+        "name": "Vibration",
+        "tab": "b948f38578d0479b",
+        "order": 5,
+        "disp": true,
+        "width": "12",
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "cc458bc7a1694df2",
+        "type": "ui_group",
+        "name": "Terrain",
+        "tab": "b948f38578d0479b",
+        "order": 6,
+        "disp": true,
+        "width": "12",
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "f44f94b550784331",
+        "type": "ui_group",
+        "name": "EKF Health",
+        "tab": "b948f38578d0479b",
+        "order": 7,
+        "disp": true,
+        "width": "12",
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "b948f38578d0479b",
+        "type": "ui_tab",
+        "name": "Telemetry Dashboard",
+        "icon": "dashboard",
+        "order": 1,
+        "disabled": false,
+        "hidden": false
+    }
+]
